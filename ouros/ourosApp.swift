@@ -9,9 +9,10 @@ import SwiftUI
 
 @main
 struct ourosApp: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-    }
+	var body: some Scene {
+		WindowGroup("Ouros") {
+			ContentView()
+		}
+	}
 }
+
