@@ -1,0 +1,13 @@
+.DS_Store
+DerivedData/
+build/
+.build/
+*.xcresult
+*.xcuserstate
+xcuserdata/.DS_Store
+DerivedData/
+build/
+.build/
+*.xcresult
+*.xcuserstate
+xcuserdata/
