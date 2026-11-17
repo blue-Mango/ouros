@@ -14,7 +14,7 @@ private struct ModelsResponse: Decodable {
 private struct ChatRequest: Encodable {
 	let model: String
 	let messages: [ChatMessage]
-	let stream = false
+	let stream = true
 }
 
 private struct ChatMessage: Encodable {
@@ -50,7 +50,11 @@ struct MLXClient {
 			.data
 	}
 
-	func chat(model: String, messages: [Message]) async throws -> String {
+	func chat(
+		model: String,
+		messages: [Message],
+		onChunk: @escaping @MainActor (String) -> Void
+	) async throws -> String {
 		let url = URL(string: "http://127.0.0.1:8080/v1/chat/completions")!
 		var request = URLRequest(url: url)
 		request.httpMethod = "POST"
@@ -66,18 +70,34 @@ struct MLXClient {
 			ChatRequest(model: model, messages: chatMessages)
 		)
 
-		let (data, response) = try await URLSession.shared.data(for: request)
+		let (bytes, response) = try await URLSession.shared.bytes(for: request)
 		guard let response = response as? HTTPURLResponse,
 			response.statusCode == 200
 		else {
 			throw URLError(.badServerResponse)
 		}
 
-		let result = try JSONDecoder().decode(ChatResponse.self, from: data)
-		guard let reply = result.choices.first?.message.content else {
-			throw URLError(.cannotParseResponse)
+		var reply = ""
+
+		for try await line in bytes.lines {
+			guard line.hasPrefix("data:") else { continue }
+
+			let payload = String(line.dropFirst(5))
+				.trimmingCharacters(in: .whitespaces)
+
+			if payload == "[DONE]" { break }
+
+			let event = try JSONDecoder().decode(
+				ChatStreamResponse.self,
+				from: Data(payload.utf8)
+			)
+
+			if let chunk = event.choices.first?.delta.content {
+				reply += chunk
+				onChunk(chunk)
+			}
 		}
 
-		return reply.trimmingCharacters(in: .whitespacesAndNewlines)
+		return reply
 	}
 }
