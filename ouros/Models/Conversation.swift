@@ -9,6 +9,8 @@ import Foundation
 
 struct Conversation: Identifiable {
 	let id = UUID()
+	var createdAt: Date = .now
+	var updatedAt: Date
 	var title: String
 	var messages: [Message]
 }
