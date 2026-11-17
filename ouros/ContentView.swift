@@ -20,8 +20,14 @@ struct ContentView: View {
 	@State private var draft: String = ""
 	@State private var chatError: String?
 
-	init(previewConvos: [Conversation] = []) {
+	init(
+		previewConvos: [Conversation] = [],
+		previewModels: [LocalModel] = [],
+		previewSelectedModel: String = ""
+	) {
 		_conversations = State(initialValue: previewConvos)
+		_models = State(initialValue: previewModels)
+		_selectedModel = State(initialValue: previewSelectedModel)
 	}
 
 	private var selectedConversation: Conversation? {
@@ -44,6 +50,11 @@ struct ContentView: View {
 				onSend: { send() }
 			)
 		}
+		.frame(minWidth: 600, minHeight: 400)
+		.frame(maxWidth: .infinity, maxHeight: .infinity)
+		.overlay(alignment: .top) {
+			Divider()
+		}
 		.toolbar {
 			ToolBarItems(
 				isSidebarOpen: $isSidebarOpen,
@@ -59,11 +70,6 @@ struct ContentView: View {
 			Color(nsColor: .windowBackgroundColor),
 			for: .windowToolbar
 		)
-		.overlay(alignment: .top) {
-			Divider()
-		}
-		.frame(minWidth: 600, minHeight: 400)
-		.frame(maxWidth: .infinity, maxHeight: .infinity)
 		.navigationTitle("ouros")
 		.task {
 			do {
@@ -88,10 +94,11 @@ struct ContentView: View {
 
 		chatError = nil
 		draft = ""
-		isSending = true
 
 		if !conversations.contains(where: { $0.id == conversationId }) {
 			let conversation = Conversation(
+				createdAt: .now,
+				updatedAt: .now,
 				title: text.count >= 50 ? "\(text.prefix(47))..." : text,
 				messages: []
 			)
@@ -106,21 +113,50 @@ struct ContentView: View {
 
 		conversations[index].messages.append(Message(role: .user, content: text))
 
+		let requestMessages = conversations[index].messages
+		let assistantMessage = Message(role: .assistant, content: "")
+		let assistantId = assistantMessage.id
+		conversations[index].messages.append(assistantMessage)
+
+		isSending = true
+
 		Task { @MainActor in
 			defer { isSending = false }
 
 			do {
-				let reply = try await MLXClient().chat(
+				_ = try await MLXClient().chat(
 					model: model,
-					messages: conversations[index].messages
-				)
+					messages: requestMessages,
+					onChunk: { chunk in
+						guard
+							let conversationIndex = conversations.firstIndex(
+								where: { $0.id == conversationId }
+							),
+							let messageIndex = conversations[conversationIndex].messages
+								.firstIndex(
+									where: { $0.id == assistantId }
+								)
+						else { return }
 
-				conversations[index].messages.append(
-					Message(role: .assistant, content: reply)
+						conversations[conversationIndex].messages[messageIndex].content +=
+							chunk
+					}
 				)
 			} catch {
-				chatError =
-					"Couldn’t get a reply: \(error.localizedDescription)"
+				chatError = "Couldn’t get a reply: \(error.localizedDescription)"
+
+				if let conversationIndex = conversations.firstIndex(where: {
+					$0.id == conversationId
+				}),
+					let messageIndex = conversations[conversationIndex].messages
+						.firstIndex(
+							where: { $0.id == assistantId }
+						),
+					conversations[conversationIndex].messages[messageIndex].content
+						.isEmpty
+				{
+					conversations[conversationIndex].messages.remove(at: messageIndex)
+				}
 			}
 		}
 	}
@@ -143,17 +179,22 @@ private struct ToolBarItems: ToolbarContent {
 			} label: {
 				Label("Open sidebar", systemImage: "sidebar.leading")
 			}
-			.buttonStyle(.plain)
+			.buttonStyle(.accessoryBarAction)
 			.help("Open sidebar")
 		}
 		.sharedBackgroundVisibility(.hidden)
 
 		ToolbarItem(placement: .automatic) {
 			Menu {
-				ForEach(models) { model in
-					Button(model.name) {
-						selectedModel = model.id
+				if models.count > 0 {
+					ForEach(models) { model in
+						Button(model.name) {
+							selectedModel = model.id
+						}
+						.buttonStyle(.accessoryBarAction)
 					}
+				} else {
+					Text("No models available, add some to get started.")
 				}
 			} label: {
 				HStack(spacing: 8) {
@@ -172,7 +213,7 @@ private struct ToolBarItems: ToolbarContent {
 			} label: {
 				Label("New chat", systemImage: "square.and.pencil")
 			}
-			.buttonStyle(.plain)
+			.buttonStyle(.accessoryBarAction)
 			.help("New chat")
 			.disabled(isSending)
 		}
@@ -191,52 +232,66 @@ private struct Sidebar: View {
 	var body: some View {
 
 		if isSidebarOpen {
-			HStack {
-				List {
+			ScrollView {
+				LazyVStack(spacing: 0) {
 					ForEach(conversations.reversed()) { convo in
 						VStack(spacing: 0) {
 							Button {
 								conversationId = convo.id
 							} label: {
-								Text(convo.title)
+								VStack {
+									Text(convo.title)
+										.font(.system(size: 24, weight: .thin))
+										.frame(maxWidth: .infinity, alignment: .leading)
+									Text(
+										convo.updatedAt.formatted(
+											date: .abbreviated,
+											time: .shortened
+										)
+									)
+									.font(.system(size: 12, weight: .thin))
+									.foregroundStyle(.gray)
 									.frame(maxWidth: .infinity, alignment: .leading)
-									.padding(.horizontal, 8)
-									.padding(.vertical, 8)
-									.background(
-										conversationId == convo.id
-											? Color(nsColor: .separatorColor)
-											: hoveredId == convo.id
-												? Color(nsColor: .separatorColor).opacity(0.5) : .clear,
-										in: RoundedRectangle(cornerRadius: 4)
-									)
-									.animation(
-										.easeOut(duration: 0.1),
-										value: hoveredId == convo.id,
-									)
-									.animation(
-										.easeOut(duration: 0.1),
-										value: conversationId == convo.id
-									)
-									.contentShape(Rectangle())
-									.onHover { hovering in
-										if hovering {
-											hoveredId = convo.id
-										} else {
-											hoveredId = nil
-										}
+								}
+								.frame(maxWidth: .infinity, alignment: .leading)
+								.padding(.horizontal, 8)
+								.padding(.vertical, 8)
+								.background(
+									conversationId == convo.id
+										? Color(.active)
+										: hoveredId == convo.id
+											? Color(nsColor: .hover).opacity(0.5) : .clear,
+									in: RoundedRectangle(cornerRadius: 4)
+								)
+								.animation(
+									.easeOut(duration: 0.1),
+									value: hoveredId == convo.id,
+								)
+								.animation(
+									.easeOut(duration: 0.1),
+									value: conversationId == convo.id
+								)
+								.contentShape(Rectangle())
+								.onHover { hovering in
+									hoveredId = hovering ? convo.id : nil
+
+									if hovering {
+										NSCursor.pointingHand.push()
+									} else {
+										NSCursor.pop()
 									}
+								}
 							}
 							.buttonStyle(.plain)
+							.padding(8)
 
 							if convo.id != conversations.first?.id {
 								Divider()
-									.padding(.vertical, 8)
 							}
 						}
-						.listRowInsets(EdgeInsets())
-						.listRowSeparator(.hidden)
 					}
 				}
+				.frame(maxWidth: .infinity)
 			}
 			.frame(
 				minWidth: 220,
@@ -296,6 +351,8 @@ private struct ContentArea: View {
 		.overlay {
 			if selectedConversation?.messages.isEmpty ?? true {
 				Text("Hey there,\nWhat do you want to work on today?")
+					.font(.system(size: 24, weight: .thin))
+					.foregroundStyle(.gray)
 					.multilineTextAlignment(.center)
 					.frame(
 						maxWidth: .infinity,
@@ -452,15 +509,35 @@ private struct ErrorBanner: View {
 	ContentView(
 		previewConvos: [
 			Conversation(
+				createdAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				updatedAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
 				title: "New convo",
 				messages: [
 					Message(role: .user, content: "Hello"),
 					Message(role: .assistant, content: "Hi there!"),
 					Message(role: .user, content: "How you doing?!"),
 					Message(role: .assistant, content: "Convo1!"),
-				]
+				],
 			),
 			Conversation(
+				createdAt: .now,
+				updatedAt: .now,
 				title: "Another new convo",
 				messages: [
 					Message(role: .user, content: "Convo2"),
@@ -470,6 +547,24 @@ private struct ErrorBanner: View {
 				]
 			),
 			Conversation(
+				createdAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				updatedAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
 				title: "Annnnd another",
 				messages: [
 					Message(role: .user, content: "Hello"),
@@ -479,19 +574,186 @@ private struct ErrorBanner: View {
 				]
 			),
 			Conversation(
-				title: "again, new convo",
+				createdAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				updatedAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				title: "again - new convo",
 				messages: [
 					Message(role: .user, content: "Convo4"),
 					Message(role: .assistant, content: "Hi there!"),
 				]
 			),
 			Conversation(
+				createdAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				updatedAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
 				title: "last convo added manually",
 				messages: [
 					Message(role: .user, content: "Convo 5"),
 					Message(role: .assistant, content: "Hi again!"),
 				]
 			),
-		]
+			Conversation(
+				createdAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				updatedAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				title: "convo added manually",
+				messages: [
+					Message(role: .user, content: "Convo 6"),
+					Message(role: .assistant, content: "Hi again!"),
+				]
+			),
+			Conversation(
+				createdAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				updatedAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				title: "last convo",
+				messages: [
+					Message(role: .user, content: "Convo 7"),
+					Message(role: .assistant, content: "Hi again!"),
+				]
+			),
+			Conversation(
+				createdAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				updatedAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				title: "joking - not last",
+				messages: [
+					Message(role: .user, content: "Convo 8"),
+					Message(role: .assistant, content: "Hi again!"),
+				]
+			),
+			Conversation(
+				createdAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				updatedAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				title: "lol",
+				messages: [
+					Message(role: .user, content: "Convo 9"),
+					Message(role: .assistant, content: "Hi again!"),
+				]
+			),
+			Conversation(
+				createdAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				updatedAt: Calendar.current.date(
+					from: DateComponents(
+						year: 2026,
+						month: 11,
+						day: 17,
+						hour: 21,
+						minute: 0
+					)
+				)!,
+				title: "last convo added manually",
+				messages: [
+					Message(role: .user, content: "Convo 10"),
+					Message(role: .assistant, content: "Hi again!"),
+				]
+			),
+		],
+		previewModels: [
+			LocalModel(id: "openAI"),
+			LocalModel(id: "claude"),
+			LocalModel(id: "deepseek"),
+		],
+		previewSelectedModel: "openAI"
 	)
 }
