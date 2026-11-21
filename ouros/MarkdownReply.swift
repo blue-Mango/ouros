@@ -26,6 +26,11 @@ struct MarkdownReply: View {
 		let listMarker: ListMarker?
 	}
 
+	private nonisolated struct RenderInput: Equatable {
+		let source: String
+		let isStreaming: Bool
+	}
+
 	private struct RenderedMarkdown {
 		let source: String
 		let blocks: [Block]
@@ -147,22 +152,25 @@ struct MarkdownReply: View {
 			}
 		}
 		.font(.system(size: 13))
-		.onAppear { sourceChanged(source) }
-		.onChange(of: source) { _, text in sourceChanged(text) }
-		.onChange(of: isStreaming) { _, streaming in
-			if !streaming {
-				cancelScheduledParse()
-				render(source)
-			}
+		.task(id: RenderInput(source: source, isStreaming: isStreaming)) {
+			// Leave the current view update before writing the renderer's state.
+			await Task.yield()
+			guard !Task.isCancelled else { return }
+			updateRendering()
 		}
 		.onDisappear(perform: cancelScheduledParse)
 	}
 
-	private func sourceChanged(_ text: String) {
-		latestSource = text
+	private func updateRendering() {
+		guard isStreaming else {
+			cancelScheduledParse()
+			render(source)
+			return
+		}
 
-		if !isStreaming || (rendered?.source.isEmpty ?? true) {
-			render(text)
+		latestSource = source
+		if rendered?.source.isEmpty ?? true {
+			render(source)
 			return
 		}
 
