@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-struct MarkdownReply: View {
+struct MarkdownTextOutput: View {
 	let source: String
 	let isStreaming: Bool
 
@@ -37,10 +37,15 @@ struct MarkdownReply: View {
 	}
 
 	private func parseBlocks(_ source: String) -> [Block] {
-		guard let parsed = try? AttributedString(
-			markdown: source,
-			options: .init(interpretedSyntax: .full, appliesSourcePositionAttributes: true)
-		) else { return [] }
+		guard
+			let parsed = try? AttributedString(
+				markdown: source,
+				options: .init(
+					interpretedSyntax: .full,
+					appliesSourcePositionAttributes: true
+				)
+			)
+		else { return [] }
 
 		var blocks: [Block] = []
 		var listedItems: Set<Int> = []
@@ -50,18 +55,26 @@ struct MarkdownReply: View {
 		while let (intent, range) = next {
 			next = runs.next()
 			let components = intent?.components ?? []
-			let lists = components.filter { $0.kind == .orderedList || $0.kind == .unorderedList }
+			let lists = components.filter {
+				$0.kind == .orderedList || $0.kind == .unorderedList
+			}
 			var text = AttributedString(parsed[range])
 			var marker: ListMarker?
 			for component in components {
 				guard case .listItem(let ordinal) = component.kind else { continue }
 				if listedItems.insert(component.identity).inserted {
-					if components.first?.kind == .paragraph, let checked = taskState(in: text, source: source) {
+					if components.first?.kind == .paragraph,
+						let checked = taskState(in: text, source: source)
+					{
 						marker = .task(checked: checked)
-						let afterMarker = text.characters.dropFirst(3).drop(while: \.isWhitespace)
+						let afterMarker = text.characters.dropFirst(3).drop(
+							while: \.isWhitespace
+						)
 						text = AttributedString(text[afterMarker.startIndex...])
 					} else {
-						marker = .text(lists.first?.kind == .orderedList ? "\(ordinal)." : "•")
+						marker = .text(
+							lists.first?.kind == .orderedList ? "\(ordinal)." : "•"
+						)
 					}
 				}
 				break
@@ -75,7 +88,11 @@ struct MarkdownReply: View {
 					let nextCell = tableCell(in: cellIntent?.components ?? []),
 					nextCell.tableID == cell.tableID
 				{
-					table.set(AttributedString(parsed[cellRange]), row: nextCell.row, column: nextCell.column)
+					table.set(
+						AttributedString(parsed[cellRange]),
+						row: nextCell.row,
+						column: nextCell.column
+					)
 					next = runs.next()
 				}
 				content = .table(table)
@@ -83,12 +100,14 @@ struct MarkdownReply: View {
 				content = .text(text, kind: components.first?.kind)
 			}
 
-			blocks.append(Block(
-				content: content,
-				isQuoted: components.contains { $0.kind == .blockQuote },
-				listDepth: lists.count,
-				listMarker: marker
-			))
+			blocks.append(
+				Block(
+					content: content,
+					isQuoted: components.contains { $0.kind == .blockQuote },
+					listDepth: lists.count,
+					listMarker: marker
+				)
+			)
 		}
 		return blocks
 	}
@@ -125,7 +144,9 @@ struct MarkdownReply: View {
 		let column: Int
 	}
 
-	private func tableCell(in components: [PresentationIntent.IntentType]) -> TableCell? {
+	private func tableCell(in components: [PresentationIntent.IntentType])
+		-> TableCell?
+	{
 		guard components.count >= 3,
 			case .tableCell(let column) = components[0].kind,
 			case .table(let columns) = components[2].kind
@@ -138,7 +159,12 @@ struct MarkdownReply: View {
 		default: return nil
 		}
 
-		return TableCell(tableID: components[2].identity, columns: columns, row: row, column: column)
+		return TableCell(
+			tableID: components[2].identity,
+			columns: columns,
+			row: row,
+			column: column
+		)
 	}
 
 	var body: some View {
@@ -226,7 +252,9 @@ struct MarkdownReply: View {
 		switch marker {
 		case .task(let checked):
 			Image(systemName: checked ? "checkmark.square" : "square")
-				.accessibilityLabel(checked ? Text("Completed task") : Text("Incomplete task"))
+				.accessibilityLabel(
+					checked ? Text("Completed task") : Text("Incomplete task")
+				)
 		case .text(let text):
 			Text(verbatim: text)
 				.monospacedDigit()
@@ -246,7 +274,10 @@ struct MarkdownReply: View {
 	}
 
 	@ViewBuilder
-	private func textBlock(_ text: AttributedString, kind: PresentationIntent.Kind?) -> some View {
+	private func textBlock(
+		_ text: AttributedString,
+		kind: PresentationIntent.Kind?
+	) -> some View {
 		switch kind {
 		case .header(let level):
 			heading(text, level: level)
@@ -270,14 +301,15 @@ struct MarkdownReply: View {
 		}
 	}
 	private func heading(_ text: AttributedString, level: Int) -> some View {
-		let size: CGFloat = switch level {
-		case 1: 24
-		case 2: 20
-		case 3: 17
-		case 4: 15
-		case 5: 14
-		default: 13
-		}
+		let size: CGFloat =
+			switch level {
+			case 1: 24
+			case 2: 20
+			case 3: 17
+			case 4: 15
+			case 5: 14
+			default: 13
+			}
 
 		return VStack(alignment: .leading, spacing: 6) {
 			Text(text)
@@ -334,7 +366,10 @@ private struct MarkdownTable: View {
 				}
 			}
 			.fixedSize(horizontal: true, vertical: false)
-			.background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+			.background(
+				.quaternary.opacity(0.5),
+				in: RoundedRectangle(cornerRadius: 6)
+			)
 			.overlay {
 				RoundedRectangle(cornerRadius: 6)
 					.strokeBorder(.quaternary)
@@ -343,7 +378,9 @@ private struct MarkdownTable: View {
 		}
 	}
 
-	private func alignment(of column: PresentationIntent.TableColumn) -> HorizontalAlignment {
+	private func alignment(of column: PresentationIntent.TableColumn)
+		-> HorizontalAlignment
+	{
 		switch column.alignment {
 		case .center: .center
 		case .right: .trailing
