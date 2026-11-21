@@ -374,7 +374,13 @@ private struct MessageRow: View {
 	private var isUser: Bool { message.role == .user }
 
 	var body: some View {
-		Text(message.content)
+		Group {
+			if isUser {
+				Text(verbatim: message.content)
+			} else {
+				MarkdownReply(source: message.content)
+			}
+		}
 			.textSelection(.enabled)
 			.padding(12)
 			.background {
