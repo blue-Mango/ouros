@@ -10,13 +10,15 @@ import SwiftUI
 struct ContentView: View {
 	@State private var conversations: [Conversation]
 	@State private var conversationId: UUID?
+	@State private var streamingMessageID: UUID?
 
 	@State private var models: [LocalModel] = []
 	@State private var selectedModel: String?
+	@State private var reasoningEffort: String?
+	@State private var isThinkingEnabled: Bool = false
 
 	@State private var isSidebarOpen: Bool = true
 	@State private var isSending: Bool = false
-	@State private var streamingMessageID: UUID?
 
 	@State private var draft: String = ""
 	@State private var chatError: String?
@@ -40,16 +42,18 @@ struct ContentView: View {
 			Sidebar(
 				conversationId: $conversationId,
 				isSidebarOpen: isSidebarOpen,
+				isSending: isSending,
 				conversations: conversations,
 			)
 
 			Canvas(
-				chatError: $chatError,
 				draft: $draft,
+				chatError: $chatError,
 				isSending: isSending,
 				streamingMessageID: streamingMessageID,
 				selectedConversation: selectedConversation,
-				onSend: { send() }
+				onExpandMessage: expandMessage,
+				onSend: { send() },
 			)
 		}
 		.frame(minWidth: 600, minHeight: 400)
@@ -61,6 +65,8 @@ struct ContentView: View {
 			ToolBarItems(
 				isSidebarOpen: $isSidebarOpen,
 				isSending: $isSending,
+				isThinkingEnabled: $isThinkingEnabled,
+				reasoningEffort: $reasoningEffort,
 				selectedModel: $selectedModel,
 				chatError: $chatError,
 				draft: $draft,
@@ -72,7 +78,9 @@ struct ContentView: View {
 			Color(nsColor: .windowBackgroundColor),
 			for: .windowToolbar
 		)
-		.navigationTitle("ouros")
+		.toolbarBackgroundVisibility(.visible, for: .automatic)
+		.navigationTitle(selectedConversation?.title ?? "New chat")
+		.presentedWindowToolbarStyle(.unifiedCompact)
 		.task {
 			do {
 				models = try await MLXClient().fetchModels()
@@ -82,13 +90,33 @@ struct ContentView: View {
 		}
 	}
 
+	private func expandMessage(_ messageId: UUID, _ isExpanded: Bool) {
+		guard
+			let convoIndex = conversations.firstIndex(where: {
+				$0.id == conversationId
+			}),
+			let messageIndex = conversations[convoIndex].messages.firstIndex(where: {
+				$0.id == messageId
+			}),
+			conversations[convoIndex].messages[messageIndex].role
+				== .assistant
+		else { return }
+
+		conversations[convoIndex].messages[messageIndex]
+			.setIsExpanded(isExpanded)
+	}
+
 	private func send() {
 		guard !isSending else { return }
 
 		let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard !text.isEmpty else { return }
 
-		guard let model = selectedModel else {
+		guard
+			let model = selectedModel?.trimmingCharacters(
+				in: .whitespacesAndNewlines
+			), !model.isEmpty
+		else {
 			chatError = "Select a model first."
 
 			return
@@ -120,6 +148,8 @@ struct ContentView: View {
 		let assistantId = assistantMessage.id
 		conversations[index].messages.append(assistantMessage)
 
+		conversations[index].updatedAt = .now
+
 		streamingMessageID = assistantId
 		isSending = true
 
@@ -133,23 +163,55 @@ struct ContentView: View {
 				_ = try await MLXClient().chat(
 					model: model,
 					messages: requestMessages,
-					onChunk: { chunk in
+					reasoningEffort: reasoningEffort,
+					enableThinking: isThinkingEnabled,
+					onReasoning: { chunk in
 						guard
-							let conversationIndex = conversations.firstIndex(
+							let convoIndex = conversations.firstIndex(
 								where: { $0.id == conversationId }
 							),
-							let messageIndex = conversations[conversationIndex].messages
+							let messageIndex = conversations[convoIndex].messages
 								.firstIndex(
 									where: { $0.id == assistantId }
 								)
 						else { return }
 
-						conversations[conversationIndex].messages[messageIndex].content +=
+						if conversations[convoIndex].messages[messageIndex].role
+							== .assistant
+						{
+							conversations[convoIndex].messages[messageIndex].setIsExpanded(
+								true
+							)
+						}
+
+						conversations[convoIndex].messages[messageIndex].reasoning +=
 							chunk
-					}
+					},
+					onChunk: { chunk in
+						guard
+							let convoIndex = conversations.firstIndex(
+								where: { $0.id == conversationId }
+							),
+							let messageIndex = conversations[convoIndex].messages
+								.firstIndex(
+									where: { $0.id == assistantId }
+								)
+						else { return }
+
+						if conversations[convoIndex].messages[messageIndex].role
+							== .assistant
+						{
+							conversations[convoIndex].messages[messageIndex].setIsExpanded(
+								false
+							)
+						}
+
+						conversations[convoIndex].messages[messageIndex].content +=
+							chunk
+					},
 				)
 			} catch {
-				chatError = "Couldn’t get a reply: \(error.localizedDescription)"
+				chatError = "Couldn’t get a reply"
 
 				if let conversationIndex = conversations.firstIndex(where: {
 					$0.id == conversationId
@@ -171,6 +233,8 @@ struct ContentView: View {
 private struct ToolBarItems: ToolbarContent {
 	@Binding var isSidebarOpen: Bool
 	@Binding var isSending: Bool
+	@Binding var isThinkingEnabled: Bool
+	@Binding var reasoningEffort: String?
 	@Binding var selectedModel: String?
 	@Binding var chatError: String?
 	@Binding var draft: String
@@ -184,9 +248,42 @@ private struct ToolBarItems: ToolbarContent {
 				isSidebarOpen.toggle()
 			} label: {
 				Label("Open sidebar", systemImage: "sidebar.leading")
+					.font(.system(size: 12, weight: .thin))
 			}
 			.buttonStyle(.accessoryBarAction)
 			.help("Open sidebar")
+		}
+		.sharedBackgroundVisibility(.hidden)
+
+		ToolbarSpacer(.flexible, placement: .automatic)
+
+		if isThinkingEnabled {
+			ToolbarItem(placement: .automatic) {
+				Picker("Reasoning effort", selection: $reasoningEffort) {
+					ForEach(["low", "medium", "xhigh"], id: \.self) { effort in
+						Text(effort == "xhigh" ? "Extra high" : effort.capitalized)
+							.tag(effort)
+							.font(.system(size: 12, weight: .thin))
+					}
+				}
+			}
+			.sharedBackgroundVisibility(.hidden)
+		}
+
+		ToolbarItem(placement: .automatic) {
+			Button {
+				isThinkingEnabled = !isThinkingEnabled
+				reasoningEffort = reasoningEffort ?? "low"
+			} label: {
+				Label(
+					"Thinking",
+					systemImage: isThinkingEnabled ? "brain.fill" : "brain"
+				)
+				.font(.system(size: 12, weight: .thin))
+			}
+			.buttonStyle(.accessoryBarAction)
+			.help(isThinkingEnabled ? "Thinking on" : "Thinking off")
+			.disabled(isSending)
 		}
 		.sharedBackgroundVisibility(.hidden)
 
@@ -201,13 +298,25 @@ private struct ToolBarItems: ToolbarContent {
 					}
 				} else {
 					Text("No models available, add some to get started.")
+						.font(.system(size: 12, weight: .thin))
 				}
 			} label: {
 				HStack(spacing: 8) {
 					Image(systemName: "cpu")
+						.font(.system(size: 12, weight: .thin))
 					Text(selectedModel ?? "Choose model")
+						.font(.system(size: 12, weight: .thin))
 				}
 			}
+		}
+		.sharedBackgroundVisibility(.hidden)
+
+		ToolbarItem(placement: .automatic) {
+			HStack {
+				Divider()
+					.frame(height: 16)
+			}
+			.accessibilityHidden(true)
 		}
 		.sharedBackgroundVisibility(.hidden)
 
@@ -218,6 +327,7 @@ private struct ToolBarItems: ToolbarContent {
 				conversationId = nil
 			} label: {
 				Label("New chat", systemImage: "square.and.pencil")
+					.font(.system(size: 12, weight: .thin))
 			}
 			.buttonStyle(.accessoryBarAction)
 			.help("New chat")
@@ -231,6 +341,7 @@ private struct Sidebar: View {
 	@Binding var conversationId: UUID?
 
 	let isSidebarOpen: Bool
+	let isSending: Bool
 	let conversations: [Conversation]
 
 	@State private var hoveredId: UUID?
@@ -249,14 +360,27 @@ private struct Sidebar: View {
 									Text(convo.title)
 										.font(.system(size: 24, weight: .thin))
 										.frame(maxWidth: .infinity, alignment: .leading)
-									Text(
-										convo.updatedAt.formatted(
-											date: .abbreviated,
-											time: .shortened
+
+									HStack {
+										Text(
+											convo.updatedAt.formatted(
+												date: .abbreviated,
+												time: .shortened
+											)
 										)
-									)
-									.font(.system(size: 12, weight: .thin))
-									.foregroundStyle(.gray)
+										.font(.system(size: 12, weight: .thin))
+										.foregroundStyle(.gray)
+										.frame(maxWidth: .infinity, alignment: .leading)
+
+										if isSending {
+											Spacer()
+
+											Text("Working")
+												.font(.system(size: 12, weight: .thin))
+												.foregroundStyle(.gray)
+												.frame(maxWidth: .infinity, alignment: .trailing)
+										}
+									}
 									.frame(maxWidth: .infinity, alignment: .leading)
 								}
 								.frame(maxWidth: .infinity, alignment: .leading)
@@ -311,12 +435,14 @@ private struct Sidebar: View {
 }
 
 private struct Canvas: View {
-	@Binding var chatError: String?
 	@Binding var draft: String
+	@Binding var chatError: String?
 
 	let isSending: Bool
 	let streamingMessageID: UUID?
 	let selectedConversation: Conversation?
+
+	let onExpandMessage: (UUID, Bool) -> Void
 	let onSend: () -> Void
 
 	var body: some View {
@@ -326,6 +452,7 @@ private struct Canvas: View {
 				isSending: isSending,
 				streamingMessageID: streamingMessageID,
 				selectedConversation: selectedConversation,
+				onExpandMessage: onExpandMessage
 			)
 
 			PromptArea(
@@ -336,6 +463,7 @@ private struct Canvas: View {
 				onSend: { onSend() }
 			)
 		}
+		.frame(minWidth: 220)
 	}
 }
 
@@ -345,6 +473,7 @@ private struct ContentArea: View {
 	let isSending: Bool
 	let streamingMessageID: UUID?
 	let selectedConversation: Conversation?
+	let onExpandMessage: (UUID, Bool) -> Void
 
 	var body: some View {
 		ScrollView {
@@ -353,7 +482,8 @@ private struct ContentArea: View {
 					ForEach(convo.messages) { message in
 						MessageRow(
 							message: message,
-							isStreaming: message.id == streamingMessageID
+							isStreaming: message.id == streamingMessageID,
+							onExpandMessage: onExpandMessage
 						)
 					}
 				}
@@ -375,7 +505,6 @@ private struct ContentArea: View {
 		}
 		.overlay(alignment: .bottom) {
 			ErrorBanner(chatError: $chatError)
-			SendingBanner(isSending: isSending)
 		}
 	}
 }
@@ -383,18 +512,59 @@ private struct ContentArea: View {
 private struct MessageRow: View {
 	let message: Message
 	let isStreaming: Bool
+	let onExpandMessage: (UUID, Bool) -> Void
 
 	private var isUser: Bool { message.role == .user }
 
 	var body: some View {
-		Group {
-			if isUser {
-				Text(verbatim: message.content)
-			} else {
-				MarkdownReply(source: message.content, isStreaming: isStreaming)
+		LazyVStack {
+			if !message.reasoning.isEmpty {
+				DisclosureGroup(
+					isExpanded: Binding(
+						get: { message.isExpanded ?? false },
+						set: { isExpanded in
+							onExpandMessage(message.id, isExpanded)
+						}
+
+					)
+				) {
+					Text(message.reasoning)
+						.textSelection(.enabled)
+						.foregroundStyle(.secondary)
+						.font(.system(size: 13, weight: .thin))
+						.frame(maxWidth: .infinity, alignment: .leading)
+						.padding(.horizontal, 12)
+						.padding(.top, 12)
+				} label: {
+					HStack {
+						if message.isExpanded ?? false {
+							Image(systemName: "sparkles")
+								.phaseAnimator([Color.secondary, .primary]) {
+									icon,
+									colour in
+									icon.foregroundStyle(colour)
+								} animation: { _ in
+									.easeInOut(duration: 1)
+								}
+						} else {
+							Image(systemName: "sparkles")
+								.foregroundStyle(.secondary)
+								.font(.system(size: 13, weight: .thin))
+						}
+						Text("Thinking")
+							.foregroundStyle(.secondary)
+							.font(.system(size: 13, weight: .thin))
+					}
+				}
+				.disclosureGroupStyle(.automatic)
+				.frame(maxWidth: .infinity, alignment: .leading)
 			}
-		}
+
+			Group {
+				MarkdownTextOutput(source: message.content, isStreaming: isStreaming)
+			}
 			.textSelection(.enabled)
+			.font(.system(size: 13, weight: .thin))
 			.padding(12)
 			.background {
 				RoundedRectangle(cornerRadius: 8)
@@ -412,7 +582,8 @@ private struct MessageRow: View {
 				alignment: message.role == .user
 					? .trailing : .leading
 			)
-			.padding(8)
+		}
+		.padding(12)
 	}
 }
 
@@ -459,19 +630,6 @@ private struct PromptArea: View {
 		}
 		.overlay(alignment: .top) {
 			Divider()
-		}
-	}
-}
-
-private struct SendingBanner: View {
-	let isSending: Bool
-
-	var body: some View {
-		if isSending {
-			ProgressView()
-				.padding()
-				.progressViewStyle(.circular)
-				.controlSize(.small)
 		}
 	}
 }
