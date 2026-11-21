@@ -12,7 +12,7 @@ struct ourosApp: App {
 	var body: some Scene {
 		WindowGroup("Ouros") {
 			ContentView()
+				.preferredColorScheme(.light)
 		}
 	}
 }
-
