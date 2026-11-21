@@ -13,6 +13,7 @@ struct ChatStreamResponse: Decodable {
 	}
 
 	struct Delta: Decodable {
+		let reasoning: String?
 		let content: String?
 	}
 }
