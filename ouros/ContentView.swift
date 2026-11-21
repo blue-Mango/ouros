@@ -16,6 +16,7 @@ struct ContentView: View {
 
 	@State private var isSidebarOpen: Bool = true
 	@State private var isSending: Bool = false
+	@State private var streamingMessageID: UUID?
 
 	@State private var draft: String = ""
 	@State private var chatError: String?
@@ -46,6 +47,7 @@ struct ContentView: View {
 				chatError: $chatError,
 				draft: $draft,
 				isSending: isSending,
+				streamingMessageID: streamingMessageID,
 				selectedConversation: selectedConversation,
 				onSend: { send() }
 			)
@@ -118,10 +120,14 @@ struct ContentView: View {
 		let assistantId = assistantMessage.id
 		conversations[index].messages.append(assistantMessage)
 
+		streamingMessageID = assistantId
 		isSending = true
 
 		Task { @MainActor in
-			defer { isSending = false }
+			defer {
+				streamingMessageID = nil
+				isSending = false
+			}
 
 			do {
 				_ = try await MLXClient().chat(
@@ -309,6 +315,7 @@ private struct Canvas: View {
 	@Binding var draft: String
 
 	let isSending: Bool
+	let streamingMessageID: UUID?
 	let selectedConversation: Conversation?
 	let onSend: () -> Void
 
@@ -317,6 +324,7 @@ private struct Canvas: View {
 			ContentArea(
 				chatError: $chatError,
 				isSending: isSending,
+				streamingMessageID: streamingMessageID,
 				selectedConversation: selectedConversation,
 			)
 
@@ -335,6 +343,7 @@ private struct ContentArea: View {
 	@Binding var chatError: String?
 
 	let isSending: Bool
+	let streamingMessageID: UUID?
 	let selectedConversation: Conversation?
 
 	var body: some View {
@@ -342,7 +351,10 @@ private struct ContentArea: View {
 			LazyVStack(spacing: 0) {
 				if let convo = selectedConversation {
 					ForEach(convo.messages) { message in
-						MessageRow(message: message)
+						MessageRow(
+							message: message,
+							isStreaming: message.id == streamingMessageID
+						)
 					}
 				}
 			}
@@ -370,6 +382,7 @@ private struct ContentArea: View {
 
 private struct MessageRow: View {
 	let message: Message
+	let isStreaming: Bool
 
 	private var isUser: Bool { message.role == .user }
 
@@ -378,7 +391,7 @@ private struct MessageRow: View {
 			if isUser {
 				Text(verbatim: message.content)
 			} else {
-				MarkdownReply(source: message.content)
+				MarkdownReply(source: message.content, isStreaming: isStreaming)
 			}
 		}
 			.textSelection(.enabled)

@@ -3,6 +3,11 @@ import SwiftUI
 
 struct MarkdownReply: View {
 	let source: String
+	let isStreaming: Bool
+
+	@State private var rendered: RenderedMarkdown?
+	@State private var latestSource = ""
+	@State private var parseTask: Task<Void, Never>?
 
 	private enum ListMarker {
 		case text(String)
@@ -21,7 +26,12 @@ struct MarkdownReply: View {
 		let listMarker: ListMarker?
 	}
 
-	private var blocks: [Block] {
+	private struct RenderedMarkdown {
+		let source: String
+		let blocks: [Block]
+	}
+
+	private func parseBlocks(_ source: String) -> [Block] {
 		guard let parsed = try? AttributedString(
 			markdown: source,
 			options: .init(interpretedSyntax: .full, appliesSourcePositionAttributes: true)
@@ -41,7 +51,7 @@ struct MarkdownReply: View {
 			for component in components {
 				guard case .listItem(let ordinal) = component.kind else { continue }
 				if listedItems.insert(component.identity).inserted {
-					if components.first?.kind == .paragraph, let checked = taskState(in: text) {
+					if components.first?.kind == .paragraph, let checked = taskState(in: text, source: source) {
 						marker = .task(checked: checked)
 						let afterMarker = text.characters.dropFirst(3).drop(while: \.isWhitespace)
 						text = AttributedString(text[afterMarker.startIndex...])
@@ -78,7 +88,7 @@ struct MarkdownReply: View {
 		return blocks
 	}
 
-	private func taskState(in text: AttributedString) -> Bool? {
+	private func taskState(in text: AttributedString, source: String) -> Bool? {
 		let prefix = String(text.characters.prefix(3))
 		let checked: Bool
 		switch prefix {
@@ -127,17 +137,58 @@ struct MarkdownReply: View {
 	}
 
 	var body: some View {
-		let blocks = blocks
 		VStack(alignment: .leading, spacing: 8) {
-			if blocks.isEmpty {
-				Text(verbatim: source)
-			} else {
-				ForEach(blocks.indices, id: \.self) { index in
-					blockView(blocks[index])
+			if let rendered, !rendered.blocks.isEmpty {
+				ForEach(rendered.blocks.indices, id: \.self) { index in
+					blockView(rendered.blocks[index])
 				}
+			} else {
+				Text(verbatim: rendered?.source ?? source)
 			}
 		}
 		.font(.system(size: 13))
+		.onAppear { sourceChanged(source) }
+		.onChange(of: source) { _, text in sourceChanged(text) }
+		.onChange(of: isStreaming) { _, streaming in
+			if !streaming {
+				cancelScheduledParse()
+				render(source)
+			}
+		}
+		.onDisappear(perform: cancelScheduledParse)
+	}
+
+	private func sourceChanged(_ text: String) {
+		latestSource = text
+
+		if !isStreaming || (rendered?.source.isEmpty ?? true) {
+			render(text)
+			return
+		}
+
+		// Keep the existing timer and render the newest buffer when it fires.
+		guard parseTask == nil else { return }
+
+		parseTask = Task { @MainActor in
+			do {
+				try await Task.sleep(for: .milliseconds(75))
+			} catch {
+				return
+			}
+			guard !Task.isCancelled else { return }
+			render(latestSource)
+			parseTask = nil
+		}
+	}
+
+	private func render(_ text: String) {
+		guard text != rendered?.source else { return }
+		rendered = RenderedMarkdown(source: text, blocks: parseBlocks(text))
+	}
+
+	private func cancelScheduledParse() {
+		parseTask?.cancel()
+		parseTask = nil
 	}
 
 	private func blockView(_ block: Block) -> some View {
