@@ -10,12 +10,14 @@ import Foundation
 struct Message: Identifiable {
 	let id = UUID()
 	let role: Role
+	var model: String
 	var reasoning = ""
 	var content: String
 	private(set) var isExpanded: Bool?
 
-	init(role: Role, reasoning: String = "", content: String) {
+	init(role: Role, model: String, reasoning: String = "", content: String) {
 		self.role = role
+		self.model = model
 		self.reasoning = reasoning
 		self.content = content
 		self.isExpanded = role == .assistant ? false : nil

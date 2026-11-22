@@ -235,7 +235,7 @@ struct MarkdownTextOutput: View {
 
 			blockContent(block.content)
 		}
-		.foregroundStyle(block.isQuoted ? Color.secondary : Color.primary)
+		.foregroundStyle(block.isQuoted ? Color.textSecondary : Color.textPrimary)
 		.padding(.leading, block.isQuoted ? 10 : 0)
 		.overlay(alignment: .leading) {
 			if block.isQuoted {
@@ -298,6 +298,7 @@ struct MarkdownTextOutput: View {
 
 		default:
 			Text(text)
+				.padding(.vertical, 8)
 		}
 	}
 	private func heading(_ text: AttributedString, level: Int) -> some View {
@@ -328,6 +329,7 @@ struct MarkdownTextOutput: View {
 		Rectangle()
 			.fill(.tertiary)
 			.frame(height: 1)
+			.padding(.vertical, 8)
 			.accessibilityHidden(true)
 	}
 }

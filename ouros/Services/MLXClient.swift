@@ -25,7 +25,7 @@ private struct ChatRequest: Encodable {
 	let model: String
 	let messages: [ChatMessage]
 	let stream = true
-	let maxTokens = 4096
+	let maxTokens: Int
 	let chatTemplateKwargs: ChatTemplateOptions?
 	enum CodingKeys: String, CodingKey {
 		case model, messages, stream
@@ -111,10 +111,19 @@ struct MLXClient {
 				)
 			}
 
+		let maxTokens =
+			switch (enableThinking == true, reasoningEffort) {
+			case (false, _): 4_096
+			case (true, "low"): 8_192
+			case (true, "medium"): 12_288
+			default: 16_384
+			}
+
 		request.httpBody = try JSONEncoder().encode(
 			ChatRequest(
 				model: model,
 				messages: chatMessages,
+				maxTokens: maxTokens,
 				chatTemplateKwargs: enableThinking.map { enabled in
 					ChatTemplateOptions(
 						enableThinking: enabled,
