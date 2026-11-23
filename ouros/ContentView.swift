@@ -8,12 +8,12 @@
 import SwiftUI
 
 struct ContentView: View {
-	@State private var conversations: [Conversation]
+	@Binding var models: [LocalModel]
+
+	@State private var conversations: [Conversation] = fakeConversations
 	@State private var conversationId: UUID?
 	@State private var streamingMessageID: UUID?
 
-	@State private var models: [LocalModel] = []
-	@State private var selectedModel: String?
 	@State private var reasoningEffort: String?
 	@State private var isThinkingEnabled: Bool = false
 
@@ -23,14 +23,10 @@ struct ContentView: View {
 	@State private var draft: String = ""
 	@State private var chatError: String?
 
-	init(
-		previewConvos: [Conversation] = [],
-		previewModels: [LocalModel] = [],
-		previewSelectedModel: String = ""
-	) {
-		_conversations = State(initialValue: previewConvos)
-		_models = State(initialValue: previewModels)
-		_selectedModel = State(initialValue: previewSelectedModel)
+	@State private var selectedModelID: LocalModel.ID?
+
+	private var selectedModel: LocalModel? {
+		models.first { $0.id == selectedModelID }
 	}
 
 	private var selectedConversation: Conversation? {
@@ -41,6 +37,7 @@ struct ContentView: View {
 		HSplitView {
 			Sidebar(
 				conversationId: $conversationId,
+				streamingMessageID: $streamingMessageID,
 				isSidebarOpen: isSidebarOpen,
 				isSending: isSending,
 				conversations: conversations,
@@ -67,7 +64,7 @@ struct ContentView: View {
 				isSending: $isSending,
 				isThinkingEnabled: $isThinkingEnabled,
 				reasoningEffort: $reasoningEffort,
-				selectedModel: $selectedModel,
+				selectedModelId: $selectedModelID,
 				chatError: $chatError,
 				draft: $draft,
 				conversationId: $conversationId,
@@ -81,13 +78,6 @@ struct ContentView: View {
 		.toolbarBackgroundVisibility(.visible, for: .windowToolbar)
 		.navigationTitle(selectedConversation?.title ?? "New chat")
 		.presentedWindowToolbarStyle(.unifiedCompact)
-		.task {
-			do {
-				models = try await MLXClient().fetchModels()
-			} catch {
-				print("MLX error:", error)
-			}
-		}
 	}
 
 	private func expandMessage(_ messageId: UUID, _ isExpanded: Bool) {
@@ -102,8 +92,13 @@ struct ContentView: View {
 				== .assistant
 		else { return }
 
-		conversations[convoIndex].messages[messageIndex]
-			.setIsExpanded(isExpanded)
+		var message = conversations[convoIndex].messages[messageIndex]
+
+		if message.isExpanded == true {
+			message.setIsExpanded(nil)
+		} else {
+			message.setIsExpanded(true)
+		}
 	}
 
 	private func send() {
@@ -113,9 +108,7 @@ struct ContentView: View {
 		guard !text.isEmpty else { return }
 
 		guard
-			let model = selectedModel?.trimmingCharacters(
-				in: .whitespacesAndNewlines
-			), !model.isEmpty
+			let model = selectedModel, !model.id.isEmpty
 		else {
 			chatError = "Select a model first."
 
@@ -142,13 +135,13 @@ struct ContentView: View {
 		else { return }
 
 		conversations[index].messages.append(
-			Message(role: .user, model: selectedModel ?? "", content: text)
+			Message(role: .user, model: model, content: text)
 		)
 
 		let requestMessages = conversations[index].messages
 		let assistantMessage = Message(
 			role: .assistant,
-			model: selectedModel ?? "",
+			model: model,
 			content: ""
 		)
 		let assistantId = assistantMessage.id
@@ -167,7 +160,7 @@ struct ContentView: View {
 
 			do {
 				_ = try await MLXClient().chat(
-					model: model,
+					model: model.id,
 					messages: requestMessages,
 					reasoningEffort: reasoningEffort,
 					enableThinking: isThinkingEnabled,
@@ -184,10 +177,11 @@ struct ContentView: View {
 
 						if conversations[convoIndex].messages[messageIndex].role
 							== .assistant
+							&& conversations[convoIndex].messages[messageIndex].isExpanded
+								!= nil
 						{
-							conversations[convoIndex].messages[messageIndex].setIsExpanded(
-								true
-							)
+							conversations[convoIndex].messages[messageIndex]
+								.setIsExpanded(true)
 						}
 
 						conversations[convoIndex].messages[messageIndex].reasoning +=
@@ -204,12 +198,10 @@ struct ContentView: View {
 								)
 						else { return }
 
-						if conversations[convoIndex].messages[messageIndex].role
-							== .assistant
+						if conversations[convoIndex].messages[messageIndex].content.isEmpty
 						{
-							conversations[convoIndex].messages[messageIndex].setIsExpanded(
-								false
-							)
+							conversations[convoIndex].messages[messageIndex]
+								.setIsExpanded(false)
 						}
 
 						conversations[convoIndex].messages[messageIndex].content +=
@@ -234,269 +226,4 @@ struct ContentView: View {
 			}
 		}
 	}
-}
-
-#Preview {
-	ContentView(
-		previewConvos: [
-			Conversation(
-				createdAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				updatedAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				title: "New convo",
-				messages: [
-					Message(role: .user, model: "openAi", content: "Hello"),
-					Message(role: .assistant, model: "openAi", content: "Hi there!"),
-					Message(role: .user, model: "openAi", content: "How you doing?!"),
-					Message(role: .assistant, model: "openAi", content: "Convo1!"),
-				],
-			),
-			Conversation(
-				createdAt: .now,
-				updatedAt: .now,
-				title: "Another new convo",
-				messages: [
-					Message(role: .user, model: "openAi", content: "Convo2"),
-					Message(role: .assistant, model: "openAi", content: "Hi there!"),
-					Message(role: .user, model: "openAi", content: "How you doing?!"),
-					Message(role: .assistant, model: "openAi", content: "Chillllaxing!"),
-				]
-			),
-			Conversation(
-				createdAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				updatedAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				title: "Annnnd another",
-				messages: [
-					Message(role: .user, model: "openAi", content: "Hello"),
-					Message(role: .assistant, model: "openAi", content: "Convo3"),
-					Message(role: .user, model: "openAi", content: "How you doing?!"),
-					Message(role: .assistant, model: "openAi", content: "noice"),
-				]
-			),
-			Conversation(
-				createdAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				updatedAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				title: "again - new convo",
-				messages: [
-					Message(role: .user, model: "claude", content: "Convo4"),
-					Message(role: .assistant, model: "claude", content: "Hi there!"),
-				]
-			),
-			Conversation(
-				createdAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				updatedAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				title: "last convo added manually",
-				messages: [
-					Message(role: .user, model: "deepseek", content: "Convo 5"),
-					Message(role: .assistant, model: "deepseek", content: "Hi again!"),
-				]
-			),
-			Conversation(
-				createdAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				updatedAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				title: "convo added manually",
-				messages: [
-					Message(role: .user, model: "deepseek", content: "Convo 6"),
-					Message(role: .assistant, model: "deepseek", content: "Hi again!"),
-				]
-			),
-			Conversation(
-				createdAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				updatedAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				title: "last convo",
-				messages: [
-					Message(role: .user, model: "qwen", content: "Convo 7"),
-					Message(
-						role: .assistant,
-						model: "claude",
-						content: """
-							# Hi again!
-
-							> Multiline reply
-
-							!!!!!!  
-							lalalala
-							"""
-
-					),
-				]
-			),
-			Conversation(
-				createdAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				updatedAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				title: "joking - not last",
-				messages: [
-					Message(role: .user, model: "qwen", content: "Convo 8"),
-					Message(role: .assistant, model: "qwen", content: "Hi again!"),
-				]
-			),
-			Conversation(
-				createdAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				updatedAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				title: "lol",
-				messages: [
-					Message(role: .user, model: "qwen", content: "Convo 9"),
-					Message(role: .assistant, model: "qwen", content: "Hi again!"),
-				]
-			),
-			Conversation(
-				createdAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				updatedAt: Calendar.current.date(
-					from: DateComponents(
-						year: 2026,
-						month: 11,
-						day: 17,
-						hour: 21,
-						minute: 0
-					)
-				)!,
-				title: "last convo added manually",
-				messages: [
-					Message(role: .user, model: "openAI", content: "Convo 10"),
-					Message(role: .assistant, model: "openAI", content: "Hi again!"),
-				]
-			),
-		],
-		previewModels: [
-			LocalModel(id: "openAI"),
-			LocalModel(id: "claude"),
-			LocalModel(id: "deepseek"),
-		],
-		previewSelectedModel: "openAI"
-	)
 }
