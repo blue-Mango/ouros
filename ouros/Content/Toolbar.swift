@@ -12,7 +12,7 @@ struct ToolBarItems: ToolbarContent {
 	@Binding var isSending: Bool
 	@Binding var isThinkingEnabled: Bool
 	@Binding var reasoningEffort: String?
-	@Binding var selectedModel: String?
+	@Binding var selectedModelId: String?
 	@Binding var chatError: String?
 	@Binding var draft: String
 	@Binding var conversationId: UUID?
@@ -68,8 +68,8 @@ struct ToolBarItems: ToolbarContent {
 			Menu {
 				if models.count > 0 {
 					ForEach(models) { model in
-						Button(model.name) {
-							selectedModel = model.id
+						Button(model.alias) {
+							selectedModelId = model.id
 						}
 						.buttonStyle(.accessoryBarAction)
 					}
@@ -81,8 +81,11 @@ struct ToolBarItems: ToolbarContent {
 				HStack(spacing: 8) {
 					Image(systemName: "cpu")
 						.fontInfoStyle()
-					Text(selectedModel ?? "Choose model")
-						.fontInfoStyle()
+					Text(
+						models.first(where: { $0.id == selectedModelId })?.alias
+							?? "Choose model"
+					)
+					.fontInfoStyle()
 				}
 			}
 		}
@@ -112,4 +115,31 @@ struct ToolBarItems: ToolbarContent {
 		}
 		.sharedBackgroundVisibility(.hidden)
 	}
+}
+
+#Preview {
+	@Previewable @State var isSidebarOpen: Bool = true
+	@Previewable @State var isSending: Bool = true
+	@Previewable @State var isThinkingEnabled: Bool = true
+	@Previewable @State var reasoningEffort: String? = "medium"
+	@Previewable @State var selectedModelId: String? = fakeModels[9].id
+	@Previewable @State var chatError: String? = nil
+	@Previewable @State var draft: String = ""
+	@Previewable @State var conversationId: UUID? = fakeConversations[0].id
+
+	Text("Toolbar Preview")
+		.frame(width: 800, height: 0)
+		.toolbar {
+			ToolBarItems(
+				isSidebarOpen: $isSidebarOpen,
+				isSending: $isSending,
+				isThinkingEnabled: $isThinkingEnabled,
+				reasoningEffort: $reasoningEffort,
+				selectedModelId: $selectedModelId,
+				chatError: $chatError,
+				draft: $draft,
+				conversationId: $conversationId,
+				models: fakeModels
+			)
+		}
 }
