@@ -17,23 +17,14 @@ struct MessageRow: View {
 	var body: some View {
 		LazyVStack {
 			if !message.reasoning.isEmpty {
-				DisclosureGroup(
-					isExpanded: Binding(
-						get: { message.isExpanded ?? false },
-						set: { isExpanded in
-							onExpandMessage(message.id, isExpanded)
-						}
+				let isExpanded = message.isExpanded ?? false
 
-					)
-				) {
-					Text(message.reasoning)
-						.fontConversationReasoningStyle()
-						.frame(maxWidth: .infinity, alignment: .leading)
-						.padding(.horizontal, 12)
-						.padding(.top, 12)
+				Button {
+					onExpandMessage(message.id, !(message.isExpanded ?? false))
 				} label: {
 					HStack {
-						if message.isExpanded ?? false {
+
+						if isExpanded {
 							Image(systemName: "sparkles")
 								.phaseAnimator([Color.textSecondary, .textPrimary]) {
 									icon,
@@ -44,14 +35,24 @@ struct MessageRow: View {
 								}
 						} else {
 							Image(systemName: "sparkles")
-								.fontConversationReasoningStyle()
 						}
 						Text("Thinking")
-							.fontConversationReasoningStyle()
+						Image(
+							systemName: isExpanded ? "chevron.down" : "chevron.forward"
+						)
 					}
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.fontConversationReasoningStyle()
 				}
-				.disclosureGroupStyle(.automatic)
-				.frame(maxWidth: .infinity, alignment: .leading)
+				.buttonStyle(.plain)
+
+				if isExpanded {
+					Text(message.reasoning)
+						.fontConversationReasoningStyle()
+						.frame(maxWidth: .infinity, alignment: .leading)
+						.padding(.horizontal, 12)
+						.padding(.top, 12)
+				}
 			}
 
 			Group {
@@ -59,7 +60,6 @@ struct MessageRow: View {
 			}
 			.padding(12)
 			.fontConversationStyle(isUser: isUser, message: message)
-
 		}
 		.padding(12)
 	}

@@ -9,6 +9,7 @@ import SwiftUI
 
 struct Sidebar: View {
 	@Binding var conversationId: UUID?
+	@Binding var streamingMessageID: UUID?
 
 	let isSidebarOpen: Bool
 	let isSending: Bool
@@ -17,7 +18,6 @@ struct Sidebar: View {
 	@State private var hoverId: UUID?
 
 	var body: some View {
-
 		if isSidebarOpen {
 			ScrollView {
 				LazyVStack(spacing: 0) {
@@ -31,7 +31,7 @@ struct Sidebar: View {
 										.fontTitleStyle()
 										.frame(maxWidth: .infinity, alignment: .leading)
 
-									HStack(spacing: 8) {
+									HStack(alignment: .top, spacing: 8) {
 										Text(
 											convo.updatedAt.formatted(
 												date: .abbreviated,
@@ -39,13 +39,17 @@ struct Sidebar: View {
 											)
 										)
 
-										if let model = convo.messages.last?.model {
-											Divider()
+										Divider()
 
-											Text(verbatim: model)
+										if let model = convo.messages.last?.model {
+											Text(verbatim: model.alias)
 										}
 
-										if isSending && convo.id == conversationId {
+										Divider()
+
+										if isSending
+											&& convo.messages.last?.id == streamingMessageID
+										{
 											Spacer()
 
 											let pieces: [(symbol: String, angle: Double)] = [
@@ -59,6 +63,7 @@ struct Sidebar: View {
 												ZStack {
 													ForEach(pieces.indices, id: \.self) { index in
 														Image(systemName: pieces[index].symbol)
+															.padding(2)
 															.rotationEffect(.degrees(pieces[index].angle))
 															.opacity(index == phase ? 1 : 0)
 															.foregroundStyle(.accent)
@@ -67,7 +72,18 @@ struct Sidebar: View {
 											} animation: { _ in
 												.easeInOut(duration: 1)
 											}
-											.frame(maxWidth: .infinity, alignment: .trailing)
+											.frame(alignment: .trailing)
+										} else {
+											Spacer()
+
+											Image(systemName: "puzzlepiece")
+												.hidden()
+												.overlay {
+													Image("PuzzleComplete")
+														.foregroundStyle(.textSecondary)
+												}
+												.padding(2)
+												.frame(alignment: .trailing)
 										}
 									}
 									.frame(maxWidth: .infinity, alignment: .leading)
@@ -79,6 +95,7 @@ struct Sidebar: View {
 									conversationId: conversationId,
 									hoverId: hoverId
 								)
+
 								.onHover { hovering in
 									hoverId = hovering ? convo.id : nil
 
@@ -120,8 +137,9 @@ struct Sidebar: View {
 
 	Sidebar(
 		conversationId: .constant(conversation.id),
+		streamingMessageID: .constant(conversation.messages.last?.id),
 		isSidebarOpen: true,
-		isSending: true,
+		isSending: false,
 		conversations: [conversation]
 	)
 }

@@ -23,7 +23,7 @@ extension View {
 			.padding()
 			.overlay(alignment: .trailing) {
 				Rectangle()
-					.fill(Color(.separator))
+					.fill(Color(.separatorColour))
 					.frame(width: 1)
 					.allowsHitTesting(false)
 			}
@@ -32,6 +32,12 @@ extension View {
 	func fontTitleStyle() -> some View {
 		self
 			.fontTitleSize()
+			.fontWeightStyle()
+	}
+
+	func fontSubTitleStyle() -> some View {
+		self
+			.fontSubTitleSize()
 			.fontWeightStyle()
 	}
 
@@ -49,7 +55,7 @@ extension View {
 			.overlay {
 				Rectangle()
 					.stroke(
-						isUser ? .separator : .clear,
+						isUser ? .separatorColour : .clear,
 						lineWidth: 1
 					)
 			}
@@ -137,6 +143,10 @@ extension View {
 	// Size
 	private func fontTitleSize() -> some View {
 		self.font(.system(size: 24))
+	}
+
+	private func fontSubTitleSize() -> some View {
+		self.font(.system(size: 16))
 	}
 
 	private func fontConversationSize() -> some View {
