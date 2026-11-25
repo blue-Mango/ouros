@@ -5,6 +5,7 @@
 //  Created by Mischa McLaughlin on 15/11/2026.
 //
 
+import SwiftData
 import SwiftUI
 
 @main
@@ -13,7 +14,6 @@ struct ourosApp: App {
 	@State var models: [LocalModel] = []
 
 	var body: some Scene {
-
 		WindowGroup("Ouros") {
 			ContentView(models: $models)
 				.preferredColorScheme(
@@ -27,6 +27,7 @@ struct ourosApp: App {
 					}
 				}
 		}
+		.modelContainer(for: Conversation.self)
 
 		SwiftUI.Settings {
 			Settings(isLightMode: $isLightMode, models: $models)

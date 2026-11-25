@@ -10,6 +10,7 @@ import SwiftUI
 struct Sidebar: View {
 	@Binding var conversationId: UUID?
 	@Binding var streamingMessageID: UUID?
+	@Binding var selectedModelID: String?
 
 	let isSidebarOpen: Bool
 	let isSending: Bool
@@ -21,10 +22,13 @@ struct Sidebar: View {
 		if isSidebarOpen {
 			ScrollView {
 				LazyVStack(spacing: 0) {
-					ForEach(conversations.reversed()) { convo in
+					ForEach(conversations) { convo in
+						let latestMessage = convo.orderedMessages.last
+
 						VStack(spacing: 0) {
 							Button {
 								conversationId = convo.id
+								selectedModelID = latestMessage?.modelID
 							} label: {
 								VStack {
 									Text(convo.title)
@@ -41,14 +45,14 @@ struct Sidebar: View {
 
 										Divider()
 
-										if let model = convo.messages.last?.model {
+										if let model = latestMessage?.model {
 											Text(verbatim: model.alias)
 										}
 
 										Divider()
 
 										if isSending
-											&& convo.messages.last?.id == streamingMessageID
+											&& latestMessage?.id == streamingMessageID
 										{
 											Spacer()
 
@@ -108,7 +112,7 @@ struct Sidebar: View {
 							}
 							.buttonStyle(.plain)
 
-							if convo.id != conversations.first?.id {
+							if convo.id != conversations.last?.id {
 								Divider()
 							}
 						}
@@ -138,6 +142,7 @@ struct Sidebar: View {
 	Sidebar(
 		conversationId: .constant(conversation.id),
 		streamingMessageID: .constant(conversation.messages.last?.id),
+		selectedModelID: .constant(conversation.messages.last?.modelID),
 		isSidebarOpen: true,
 		isSending: false,
 		conversations: [conversation]

@@ -75,6 +75,8 @@ struct MLXClient {
 		onReasoning: @escaping @MainActor (String) -> Void,
 		onChunk: @escaping @MainActor (String) -> Void,
 	) async throws -> String {
+		try Task.checkCancellation()
+
 		let url = URL(string: "http://127.0.0.1:8080/v1/chat/completions")!
 		var request = URLRequest(url: url)
 		request.httpMethod = "POST"
@@ -143,6 +145,8 @@ struct MLXClient {
 		var reply = ""
 
 		for try await line in bytes.lines {
+			try Task.checkCancellation()
+
 			guard line.hasPrefix("data:") else { continue }
 
 			let payload = String(line.dropFirst(5))

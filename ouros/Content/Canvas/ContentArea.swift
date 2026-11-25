@@ -21,7 +21,7 @@ struct ContentArea: View {
 		ScrollView {
 			LazyVStack(spacing: 0) {
 				if let convo = selectedConversation {
-					ForEach(convo.messages) { message in
+					ForEach(convo.orderedMessages) { message in
 						MessageRow(
 							message: message,
 							isStreaming: message.id == streamingMessageID,
@@ -47,22 +47,8 @@ struct ContentArea: View {
 			ErrorBanner(chatError: $chatError)
 		}
 		.scrollPosition($scrollPosition)
-		.onScrollPhaseChange { _, phase in
-			scrollPhase = phase
-		}
-		.onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) {
-			before,
-			after in
-			let distanceFromBottom =
-				before.contentSize.height
-				+ before.contentInsets.bottom - before.visibleRect.maxY
-
-			if scrollPhase == .idle,
-				after.contentSize.height > before.contentSize.height,
-				distanceFromBottom <= 12
-			{
-				scrollPosition.scrollTo(edge: .bottom)
-			}
+		.task(id: selectedConversation?.id) {
+			scrollPosition.scrollTo(edge: .bottom)
 		}
 	}
 }

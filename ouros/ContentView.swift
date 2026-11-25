@@ -5,25 +5,30 @@
 //  Created by Mischa McLaughlin on 15/11/2026.
 //
 
+import SwiftData
 import SwiftUI
 
 struct ContentView: View {
 	@Binding var models: [LocalModel]
 
-	@State private var conversations: [Conversation] = fakeConversations
+	@State private var replyTask: Task<Void, Never>?
+
+	@Environment(\.modelContext) private var modelContext
+	@Query(sort: \Conversation.updatedAt, order: .reverse)
+	private var conversations: [Conversation]
+
 	@State private var conversationId: UUID?
-	@State private var streamingMessageID: UUID?
-
-	@State private var reasoningEffort: String?
-	@State private var isThinkingEnabled: Bool = false
-
-	@State private var isSidebarOpen: Bool = true
-	@State private var isSending: Bool = false
 
 	@State private var draft: String = ""
+	@State private var reasoningEffort: String?
+	@State private var isThinkingEnabled: Bool = false
+	@State private var isSending: Bool = false
+	@State private var streamingMessageID: UUID?
 	@State private var chatError: String?
 
 	@State private var selectedModelID: LocalModel.ID?
+
+	@State private var isSidebarOpen: Bool = true
 
 	private var selectedModel: LocalModel? {
 		models.first { $0.id == selectedModelID }
@@ -38,6 +43,7 @@ struct ContentView: View {
 			Sidebar(
 				conversationId: $conversationId,
 				streamingMessageID: $streamingMessageID,
+				selectedModelID: $selectedModelID,
 				isSidebarOpen: isSidebarOpen,
 				isSending: isSending,
 				conversations: conversations,
@@ -51,13 +57,11 @@ struct ContentView: View {
 				selectedConversation: selectedConversation,
 				onExpandMessage: expandMessage,
 				onSend: { send() },
+				onStop: { replyTask?.cancel() },
 			)
 		}
 		.frame(minWidth: 600, minHeight: 400)
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
-		.overlay(alignment: .top) {
-			Divider()
-		}
 		.toolbar {
 			ToolBarItems(
 				isSidebarOpen: $isSidebarOpen,
@@ -92,13 +96,8 @@ struct ContentView: View {
 				== .assistant
 		else { return }
 
-		var message = conversations[convoIndex].messages[messageIndex]
-
-		if message.isExpanded == true {
-			message.setIsExpanded(nil)
-		} else {
-			message.setIsExpanded(true)
-		}
+		conversations[convoIndex].messages[messageIndex]
+			.setIsExpanded(isExpanded ? true : nil)
 	}
 
 	private func send() {
@@ -118,42 +117,43 @@ struct ContentView: View {
 		chatError = nil
 		draft = ""
 
-		if !conversations.contains(where: { $0.id == conversationId }) {
-			let conversation = Conversation(
-				createdAt: .now,
+		let conversation: Conversation
+
+		if let existing = selectedConversation {
+			conversation = existing
+		} else {
+			conversation = Conversation(
 				updatedAt: .now,
 				title: text.count >= 50 ? "\(text.prefix(47))..." : text,
 				messages: []
 			)
-
-			conversations.append(conversation)
+			modelContext.insert(conversation)
 			conversationId = conversation.id
 		}
 
-		guard let conversationId,
-			let index = conversations.firstIndex(where: { $0.id == conversationId })
-		else { return }
-
-		conversations[index].messages.append(
+		conversation.appendMessage(
 			Message(role: .user, model: model, content: text)
 		)
 
-		let requestMessages = conversations[index].messages
+		let requestMessages = conversation.orderedMessages
 		let assistantMessage = Message(
 			role: .assistant,
 			model: model,
 			content: ""
 		)
-		let assistantId = assistantMessage.id
-		conversations[index].messages.append(assistantMessage)
+		conversation.appendMessage(assistantMessage)
 
-		conversations[index].updatedAt = .now
-
-		streamingMessageID = assistantId
+		conversation.updatedAt = .now
+		streamingMessageID = assistantMessage.id
 		isSending = true
 
-		Task { @MainActor in
+		replyTask = Task { @MainActor in
 			defer {
+				if assistantMessage.content.isEmpty {
+					conversation.messages.removeAll { $0.id == assistantMessage.id }
+					modelContext.delete(assistantMessage)
+				}
+				replyTask = nil
 				streamingMessageID = nil
 				isSending = false
 			}
@@ -165,63 +165,24 @@ struct ContentView: View {
 					reasoningEffort: reasoningEffort,
 					enableThinking: isThinkingEnabled,
 					onReasoning: { chunk in
-						guard
-							let convoIndex = conversations.firstIndex(
-								where: { $0.id == conversationId }
-							),
-							let messageIndex = conversations[convoIndex].messages
-								.firstIndex(
-									where: { $0.id == assistantId }
-								)
-						else { return }
-
-						if conversations[convoIndex].messages[messageIndex].role
-							== .assistant
-							&& conversations[convoIndex].messages[messageIndex].isExpanded
-								!= nil
+						if assistantMessage.reasoning.isEmpty,
+							assistantMessage.content.isEmpty,
+							assistantMessage.isExpanded != nil
 						{
-							conversations[convoIndex].messages[messageIndex]
-								.setIsExpanded(true)
+							assistantMessage.setIsExpanded(true)
 						}
-
-						conversations[convoIndex].messages[messageIndex].reasoning +=
-							chunk
+						assistantMessage.reasoning += chunk
 					},
 					onChunk: { chunk in
-						guard
-							let convoIndex = conversations.firstIndex(
-								where: { $0.id == conversationId }
-							),
-							let messageIndex = conversations[convoIndex].messages
-								.firstIndex(
-									where: { $0.id == assistantId }
-								)
-						else { return }
-
-						if conversations[convoIndex].messages[messageIndex].content.isEmpty
-						{
-							conversations[convoIndex].messages[messageIndex]
-								.setIsExpanded(false)
+						if assistantMessage.content.isEmpty {
+							assistantMessage.setIsExpanded(false)
 						}
-
-						conversations[convoIndex].messages[messageIndex].content +=
-							chunk
+						assistantMessage.content += chunk
 					},
 				)
 			} catch {
-				chatError = "Couldn’t get a reply"
-
-				if let conversationIndex = conversations.firstIndex(where: {
-					$0.id == conversationId
-				}),
-					let messageIndex = conversations[conversationIndex].messages
-						.firstIndex(
-							where: { $0.id == assistantId }
-						),
-					conversations[conversationIndex].messages[messageIndex].content
-						.isEmpty
-				{
-					conversations[conversationIndex].messages.remove(at: messageIndex)
+				if !Task.isCancelled, conversationId == conversation.id {
+					chatError = "Couldn’t get a reply"
 				}
 			}
 		}

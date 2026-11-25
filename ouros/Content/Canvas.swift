@@ -17,6 +17,7 @@ struct Canvas: View {
 
 	let onExpandMessage: (UUID, Bool) -> Void
 	let onSend: () -> Void
+	let onStop: () -> Void
 
 	var body: some View {
 		VStack {
@@ -33,7 +34,8 @@ struct Canvas: View {
 				draft: $draft,
 				isSending: isSending,
 				selectedConversation: selectedConversation,
-				onSend: { onSend() }
+				onSend: { onSend() },
+				onStop: { onStop() }
 			)
 		}
 		.background(.backgroundCanvas)

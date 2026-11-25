@@ -14,6 +14,7 @@ struct PromptArea: View {
 	let isSending: Bool
 	let selectedConversation: Conversation?
 	let onSend: () -> Void
+	let onStop: () -> Void
 
 	var body: some View {
 		HStack(spacing: 0) {
@@ -22,20 +23,18 @@ struct PromptArea: View {
 				.onSubmit { onSend() }
 
 			Button {
-				onSend()
+				isSending ? onStop() : onSend()
 			} label: {
-				Image(systemName: "arrow.up")
+				Image(systemName: isSending ? "stop.fill" : "arrow.up")
 					.padding()
 					.contentShape(Rectangle())
 			}
 			.buttonStyle(.plain)
 			.disabled(
-				isSending
-					|| draft.trimmingCharacters(
-						in: .whitespacesAndNewlines
-					).isEmpty
+				!isSending
+					&& draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 			)
-			.accessibilityLabel("Send message")
+			.accessibilityLabel(isSending ? "Stop generating" : "Send message")
 		}
 		.overlay(alignment: .top) {
 			Divider()
